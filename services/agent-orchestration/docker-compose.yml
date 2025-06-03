@@ -1,0 +1,58 @@
+# services/agent-orchestration/docker-compose.yml
+version: '3.8'
+
+services:
+  agent-orchestration:
+    build: .
+    ports:
+      - "8000:8000"
+      - "9090:9090"
+    environment:
+      - DEBUG=true
+      - DATABASE_URL=postgresql://mip_user:mip_password@postgres:5432/mip
+      - REDIS_URL=redis://redis:6379/0
+      - PROMETHEUS_ENABLED=true
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mip-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=mip
+      - POSTGRES_USER=mip_user
+      - POSTGRES_PASSWORD=mip_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mip-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - mip-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - mip-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  mip-network:
+    driver: bridge
