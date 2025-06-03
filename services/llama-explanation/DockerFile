@@ -1,0 +1,69 @@
+# services/llama-explanation/Dockerfile
+FROM nvidia/cuda:12.1-devel-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    python3.11-venv \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlinks for python
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+RUN ln -s /usr/bin/python3.11 /usr/bin/python3
+
+# Set working directory
+WORKDIR /app
+
+# Create models directory
+RUN mkdir -p /models
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies with CUDA support
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install llama-cpp-python with CUDA support
+RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install --no-cache-dir llama-cpp-python[server] --force-reinstall --no-deps
+
+# Copy application code
+COPY src/ ./src/
+COPY tests/ ./tests/
+
+# Download and prepare quantized model (placeholder - replace with actual model)
+COPY scripts/download_model.sh /tmp/download_model.sh
+RUN chmod +x /tmp/download_model.sh && /tmp/download_model.sh
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash --uid 1001 llama
+RUN chown -R llama:llama /app /models
+USER llama
+
+# Expose ports
+EXPOSE 8000 9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set resource limits for GPU
+ENV CUDA_MEMORY_FRACTION=0.9
+ENV OMP_NUM_THREADS=8
+
+# Start command
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+

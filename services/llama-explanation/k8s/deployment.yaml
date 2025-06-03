@@ -1,0 +1,209 @@
+# services/llama-explanation/k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-explanation-service
+  namespace: mip
+  labels:
+    app: llama-explanation
+    tier: ai-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: llama-explanation
+  template:
+    metadata:
+      labels:
+        app: llama-explanation
+        tier: ai-service
+    spec:
+      containers:
+      - name: llama-explanation
+        image: mip/llama-explanation:latest
+        ports:
+        - containerPort: 8000
+          name: api
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: MODEL_PATH
+          value: "/models/llama-2-7b-explanations.Q4_K_M.gguf"
+        - name: N_GPU_LAYERS
+          value: "35"
+        - name: N_CTX
+          value: "4096"
+        - name: MAX_CONCURRENT_REQUESTS
+          value: "3"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PROMETHEUS_ENABLED
+          value: "true"
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "8Gi"
+            cpu: "2"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "16Gi"
+            cpu: "4"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 2
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: llama-model-pvc
+      nodeSelector:
+        accelerator: nvidia-tesla-v100  # or appropriate GPU type
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-explanation-service
+  namespace: mip
+  labels:
+    app: llama-explanation
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: api
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: llama-explanation
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llama-model-pvc
+  namespace: mip
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: llama-explanation-hpa
+  namespace: mip
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llama-explanation-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Pods
+    pods:
+      metric:
+        name: llama_queue_depth
+      target:
+        type: AverageValue
+        averageValue: "5"
+  - type: Resource
+    resource:
+      name: nvidia.com/gpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: llama-explanation-scaler
+  namespace: mip
+spec:
+  scaleTargetRef:
+    name: llama-explanation-service
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: llama_queue_depth
+      threshold: '5'
+      query: avg(llama_queue_depth)
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: llama_active_requests
+      threshold: '8'
+      query: avg(llama_active_requests)
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llama-explanation-network-policy
+  namespace: mip
+spec:
+  podSelector:
+    matchLabels:
+      app: llama-explanation
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: agent-orchestration
+    - podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - protocol: TCP
+      port: 8000
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  - {}  # Allow all egress for model downloads and external APIs

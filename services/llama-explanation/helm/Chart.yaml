@@ -1,0 +1,172 @@
+# services/llama-explanation/helm/Chart.yaml
+apiVersion: v2
+name: llama-explanation
+description: Llama 2-7B Explanation Service for MIP
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - llama
+  - ai
+  - nlp
+  - explanation
+  - gpu
+home: https://github.com/mip/llama-explanation
+sources:
+  - https://github.com/mip/llama-explanation
+maintainers:
+  - name: MIP Team
+    email: team@mip.ai
+
+# services/llama-explanation/helm/values.yaml
+# Default values for llama-explanation
+replicaCount: 3
+
+image:
+  repository: mip/llama-explanation
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+  metricsPort: 9090
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: llama-explanation.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# GPU and compute resources
+resources:
+  requests:
+    nvidia.com/gpu: 1
+    memory: "8Gi"
+    cpu: "2"
+  limits:
+    nvidia.com/gpu: 1
+    memory: "16Gi"
+    cpu: "4"
+
+# Node selection for GPU nodes
+nodeSelector:
+  accelerator: nvidia-tesla-v100
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+affinity: {}
+
+# Model configuration
+model:
+  path: "/models/llama-2-7b-explanations.Q4_K_M.gguf"
+  contextSize: 4096
+  gpuLayers: 35
+  batchSize: 512
+  threads: 8
+
+# Performance settings
+performance:
+  maxConcurrentRequests: 3
+  maxQueueSize: 100
+  maxBatchSize: 10
+  requestTimeout: 60
+
+# Monitoring
+monitoring:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # Custom metrics for scaling
+  customMetrics:
+    - type: Pods
+      pods:
+        metric:
+          name: llama_queue_depth
+        target:
+          type: AverageValue
+          averageValue: "5"
+
+# KEDA scaling (if enabled)
+keda:
+  enabled: true
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus:9090
+        metricName: llama_queue_depth
+        threshold: '5'
+
+# Storage for models
+persistence:
+  enabled: true
+  storageClass: "fast-ssd"
+  accessMode: ReadOnlyMany
+  size: 10Gi
+
+# Environment variables
+env:
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  PROMETHEUS_ENABLED: "true"
+  CUDA_VISIBLE_DEVICES: "0"
+  GPU_MEMORY_FRACTION: "0.9"
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1001
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 2
+
+# Network policy
+networkPolicy:
+  enabled: true
+  allowedPods:
+    - app: agent-orchestration
+    - app: api-gateway
+    - app: prometheus

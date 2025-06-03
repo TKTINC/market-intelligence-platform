@@ -1,0 +1,39 @@
+# services/llama-explanation/monitoring/llama_rules.yml
+groups:
+  - name: llama_alerts
+    rules:
+      - alert: LlamaHighLatency
+        expr: llama_processing_duration_seconds{quantile="0.95"} > 2.0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Llama service has high latency"
+          description: "95th percentile latency is {{ $value }}s"
+
+      - alert: LlamaHighQueueDepth
+        expr: llama_queue_depth > 50
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Llama queue depth is high"
+          description: "Queue depth is {{ $value }}"
+
+      - alert: LlamaGPUMemoryHigh
+        expr: llama_gpu_memory_usage_bytes / 1e9 > 14
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Llama GPU memory usage is high"
+          description: "GPU memory usage is {{ $value }}GB"
+
+      - alert: LlamaServiceDown
+        expr: up{job="llama-explanation"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Llama service is down"
+          description: "Llama explanation service is not responding"

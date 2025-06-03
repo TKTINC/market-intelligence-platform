@@ -1,0 +1,65 @@
+# services/llama-explanation/docker-compose.yml
+version: '3.8'
+
+services:
+  llama-explanation:
+    build: .
+    ports:
+      - "8000:8000"
+      - "9090:9090"
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - MODEL_PATH=/models/llama-2-7b-explanations.Q4_K_M.gguf
+      - N_GPU_LAYERS=35
+      - N_CTX=4096
+      - MAX_CONCURRENT_REQUESTS=2
+      - PROMETHEUS_ENABLED=true
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./models:/models
+      - ./src:/app/src
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - mip-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Development/testing services
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - mip-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    networks:
+      - mip-network
+
+volumes:
+  grafana_data:
+
+networks:
+  mip-network:
+    driver: bridge
