@@ -1,0 +1,15 @@
+apiVersion: v2
+name: gpt4-strategy
+description: GPT-4 Strategy Agent Service for MIP
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - trading
+  - options
+  - strategy
+  - gpt4
+  - ai
+maintainers:
+  - name: MIP Team
+    email: team@mip.ai

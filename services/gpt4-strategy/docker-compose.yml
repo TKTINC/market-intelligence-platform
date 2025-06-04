@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  gpt4-strategy:
+    build: .
+    ports:
+      - "8006:8006"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/mip
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ENABLE_SECURITY_VALIDATION=true
+      - ENABLE_RATE_LIMITING=true
+      - ENABLE_COST_TRACKING=true
+      - MAX_TOKENS=4000
+      - TEMPERATURE=0.3
+      - REQUESTS_PER_MINUTE=50
+      - COST_PER_HOUR_LIMIT=100.0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=mip
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:

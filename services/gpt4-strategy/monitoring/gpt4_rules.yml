@@ -1,0 +1,68 @@
+groups:
+  - name: gpt4_strategy_alerts
+    rules:
+      # High Error Rate
+      - alert: GPT4HighErrorRate
+        expr: (rate(gpt4_strategy_errors_total[5m]) / rate(gpt4_strategy_requests_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: gpt4-strategy
+        annotations:
+          summary: "High error rate in GPT-4 Strategy Service"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # High Response Time
+      - alert: GPT4HighResponseTime
+        expr: histogram_quantile(0.95, rate(gpt4_strategy_response_time_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: gpt4-strategy
+        annotations:
+          summary: "High response time in GPT-4 Strategy Service"
+          description: "95th percentile response time is {{ $value }}s"
+
+      # High Cost Rate
+      - alert: GPT4HighCostRate
+        expr: rate(gpt4_strategy_cost_usd_total[1h]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          service: gpt4-strategy
+        annotations:
+          summary: "High cost rate in GPT-4 Strategy Service"
+          description: "Cost rate is ${{ $value }}/hour"
+
+      # Service Down
+      - alert: GPT4ServiceDown
+        expr: up{job="gpt4-strategy"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: gpt4-strategy
+        annotations:
+          summary: "GPT-4 Strategy Service is down"
+          description: "GPT-4 Strategy Service has been down for more than 1 minute"
+
+      # High Memory Usage
+      - alert: GPT4HighMemoryUsage
+        expr: (container_memory_usage_bytes{pod=~"gpt4-strategy-.*"} / container_spec_memory_limit_bytes{pod=~"gpt4-strategy-.*"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: gpt4-strategy
+        annotations:
+          summary: "High memory usage in GPT-4 Strategy Service"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      # Rate Limit Approaching
+      - alert: GPT4RateLimitApproaching
+        expr: gpt4_strategy_rate_limit_remaining < 10
+        for: 1m
+        labels:
+          severity: warning
+          service: gpt4-strategy
+        annotations:
+          summary: "GPT-4 rate limit approaching"
+          description: "Only {{ $value }} requests remaining in current window"

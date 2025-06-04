@@ -1,0 +1,19 @@
+# GPT-4 Strategy Service Monitoring Configuration
+
+rule_files:
+  - "gpt4_rules.yml"
+
+scrape_configs:
+  - job_name: 'gpt4-strategy'
+    static_configs:
+      - targets: ['gpt4-strategy-service:8006']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  - job_name: 'gpt4-strategy-health'
+    static_configs:
+      - targets: ['gpt4-strategy-service:8006']
+    metrics_path: '/health'
+    scrape_interval: 30s
+    scrape_timeout: 5s

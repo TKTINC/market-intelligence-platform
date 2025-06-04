@@ -1,0 +1,72 @@
+# Default values for gpt4-strategy service
+
+replicaCount: 3
+
+image:
+  repository: mip/gpt4-strategy
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8006
+  targetPort: 8006
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: gpt4-strategy.mip.ai
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mip-tls
+      hosts:
+        - gpt4-strategy.mip.ai
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "1Gi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  ENABLE_SECURITY_VALIDATION: "true"
+  ENABLE_RATE_LIMITING: "true"
+  ENABLE_COST_TRACKING: "true"
+  MAX_TOKENS: "4000"
+  TEMPERATURE: "0.3"
+  REQUESTS_PER_MINUTE: "50"
+  COST_PER_HOUR_LIMIT: "100.0"
+
+secrets:
+  openai:
+    name: openai-secrets
+    key: api-key
+  database:
+    name: db-secrets
+    key: url
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    path: /metrics
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
