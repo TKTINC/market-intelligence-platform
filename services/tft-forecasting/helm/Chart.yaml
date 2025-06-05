@@ -1,0 +1,15 @@
+apiVersion: v2
+name: tft-forecasting
+description: TFT Price Forecasting Agent Service for MIP
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - trading
+  - forecasting
+  - time-series
+  - tft
+  - ai
+maintainers:
+  - name: MIP Team
+    email: team@mip.ai

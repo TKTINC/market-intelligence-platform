@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  tft-forecasting:
+    build: .
+    ports:
+      - "8007:8007"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/mip
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=mip
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_tft_tables.sql:/docker-entrypoint-initdb.d/init_tft_tables.sql
+    restart: unless-stopped
+    
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:

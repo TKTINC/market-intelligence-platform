@@ -1,0 +1,85 @@
+# Default values for tft-forecasting service
+
+replicaCount: 2
+
+image:
+  repository: mip/tft-forecasting
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8007
+  targetPort: 8007
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "50"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: tft-forecasting.mip.ai
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mip-tls
+      hosts:
+        - tft-forecasting.mip.ai
+
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+    nvidia.com/gpu: 1
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+    nvidia.com/gpu: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  targetGPUUtilizationPercentage: 80
+
+env:
+  CUDA_VISIBLE_DEVICES: "0"
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512"
+
+secrets:
+  database:
+    name: db-secrets
+    key: url
+
+storage:
+  modelStorage:
+    enabled: true
+    size: 20Gi
+    storageClassName: fast-ssd
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    path: /metrics
+
+nodeSelector:
+  nvidia.com/gpu: "true"
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: nvidia.com/gpu
+          operator: Exists

@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tft-forecasting-service
+  namespace: mip
+  labels:
+    app: tft-forecasting
+    version: v1
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: tft-forecasting
+  template:
+    metadata:
+      labels:
+        app: tft-forecasting
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8007"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        nvidia.com/gpu: "true"
+      containers:
+      - name: tft-forecasting
+        image: mip/tft-forecasting:latest
+        ports:
+        - containerPort: 8007
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-secrets
+              key: url
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "max_split_size_mb:512"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8007
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8007
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: model-storage
+          mountPath: /app/models
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: tft-model-storage
+      - name: logs
+        emptyDir: {}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tft-model-storage
+  namespace: mip
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tft-forecasting-service
+  namespace: mip
+  labels:
+    app: tft-forecasting
+spec:
+  selector:
+    app: tft-forecasting
+  ports:
+  - port: 8007
+    targetPort: 8007
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tft-forecasting-hpa
+  namespace: mip
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tft-forecasting-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: nvidia.com/gpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 180
