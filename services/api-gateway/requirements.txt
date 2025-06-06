@@ -1,0 +1,106 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# HTTP Client
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Database & Cache
+aioredis==2.0.1
+redis==5.0.1
+
+# Authentication & Security
+PyJWT==2.8.0
+bcrypt==4.1.2
+cryptography==41.0.8
+
+# Data Processing
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# System Monitoring
+psutil==5.9.6
+
+# Data Science & ML
+numpy==1.24.4
+pandas==2.0.3
+scikit-learn==1.3.2
+
+# Mathematical Operations
+statistics==1.0.3.5
+
+# Development & Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+
+# Logging & Monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+
+# Date & Time
+python-dateutil==2.8.2
+
+# Type Hints
+typing-extensions==4.8.0
+
+# CORS
+python-multipart==0.0.6
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Data Validation
+email-validator==2.1.0
+
+# Financial Data
+yfinance==0.2.28
+alpha-vantage==2.3.1
+
+# Options Pricing
+py_vollib==1.0.1
+QuantLib==1.32
+
+# WebSocket
+websockets==12.0
+
+# Background Tasks
+celery==5.3.4
+
+# Configuration
+pyyaml==6.0.1
+toml==0.10.2
+
+# Timezone Support
+pytz==2023.3
+
+# UUID Generation
+uuid==1.30
+
+# JSON Handling
+orjson==3.9.10
+
+# Request ID
+contextvars==2.4
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Middleware
+starlette==0.27.0
+
+# Data Serialization
+msgpack==1.0.7
+
+# Memory Profiling
+memory-profiler==0.61.0
+
+# Process Management
+supervisor==4.2.5
+
+# Health Checks
+healthcheck==1.3.3

@@ -1,0 +1,47 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "rules/*.yml"
+
+scrape_configs:
+  - job_name: 'mip-api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  - job_name: 'finbert-sentiment'
+    static_configs:
+      - targets: ['finbert-sentiment-service:8005']
+
+  - job_name: 'tft-forecasting'
+    static_configs:
+      - targets: ['tft-forecasting-service:8008']
+
+  - job_name: 'gpt4-strategy'
+    static_configs:
+      - targets: ['gpt4-strategy-service:8007']
+
+  - job_name: 'llama-explanation'
+    static_configs:
+      - targets: ['llama-explanation-service:8006']
+
+  - job_name: 'realtime-processing'
+    static_configs:
+      - targets: ['realtime-processing-service:8009']
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
