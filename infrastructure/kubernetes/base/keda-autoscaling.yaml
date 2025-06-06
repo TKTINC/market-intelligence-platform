@@ -1,0 +1,585 @@
+# =============================================================================
+# KEDA AUTOSCALING CONFIGURATIONS FOR MULTI-AGENT MIP
+# Advanced autoscaling based on custom metrics and queue lengths
+# =============================================================================
+
+---
+# KEDA ScaledObject for FinBERT Agent (CPU-based sentiment analysis)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: finbert-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: finbert-agent
+  pollingInterval: 15
+  cooldownPeriod: 60
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: finbert_queue_length
+      threshold: '5'
+      query: avg(finbert_pending_requests{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: finbert_cpu_usage
+      threshold: '70'
+      query: avg(rate(container_cpu_usage_seconds_total{pod=~"finbert-agent-.*"}[5m])) * 100
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: finbert_response_time
+      threshold: '2000'
+      query: avg(finbert_response_time_ms{namespace="mip-platform"})
+
+---
+# KEDA ScaledObject for Llama Agent (GPU-based reasoning)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: llama-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: llama-agent
+  pollingInterval: 30
+  cooldownPeriod: 120
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 6  # Limited by GPU availability
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: llama_queue_length
+      threshold: '3'
+      query: avg(llama_pending_requests{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: llama_gpu_memory
+      threshold: '80'
+      query: avg(nvidia_gpu_memory_used_bytes{pod=~"llama-agent-.*"} / nvidia_gpu_memory_total_bytes{pod=~"llama-agent-.*"}) * 100
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: llama_inference_time
+      threshold: '5000'
+      query: avg(llama_inference_time_ms{namespace="mip-platform"})
+
+---
+# KEDA ScaledObject for GPT-4 Agent (API-based analysis)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: gpt4-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: gpt4-agent
+  pollingInterval: 10
+  cooldownPeriod: 45
+  idleReplicaCount: 2
+  minReplicaCount: 3
+  maxReplicaCount: 20
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: gpt4_queue_length
+      threshold: '8'
+      query: avg(gpt4_pending_requests{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: gpt4_api_rate_limit
+      threshold: '0.8'
+      query: avg(gpt4_api_usage_ratio{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: gpt4_error_rate
+      threshold: '5'
+      query: avg(rate(gpt4_errors_total{namespace="mip-platform"}[5m])) * 100
+
+---
+# KEDA ScaledObject for TFT Agent (Forecasting workloads)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: tft-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: tft-agent
+  pollingInterval: 20
+  cooldownPeriod: 90
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: tft_queue_length
+      threshold: '4'
+      query: avg(tft_pending_requests{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: tft_model_load
+      threshold: '75'
+      query: avg(tft_model_cpu_usage{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: tft_forecast_time
+      threshold: '10000'
+      query: avg(tft_forecast_time_ms{namespace="mip-platform"})
+
+---
+# KEDA ScaledObject for FastAPI Gateway (Request-based scaling)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fastapi-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: fastapi-gateway
+  pollingInterval: 10
+  cooldownPeriod: 30
+  idleReplicaCount: 2
+  minReplicaCount: 3
+  maxReplicaCount: 15
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: fastapi_requests_per_second
+      threshold: '100'
+      query: avg(rate(fastapi_requests_total{namespace="mip-platform"}[1m]))
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: fastapi_active_connections
+      threshold: '80'
+      query: avg(fastapi_active_connections{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: fastapi_response_time
+      threshold: '1000'
+      query: avg(fastapi_response_time_ms{namespace="mip-platform"})
+
+---
+# KEDA ScaledObject for React Dashboard (User-based scaling)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: react-scaledobject
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: react-dashboard
+  pollingInterval: 30
+  cooldownPeriod: 60
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: react_active_users
+      threshold: '50'
+      query: avg(react_active_websocket_connections{namespace="mip-platform"})
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: react_page_load_time
+      threshold: '3000'
+      query: avg(react_page_load_time_ms{namespace="mip-platform"})
+
+---
+# =============================================================================
+# CUSTOM RESOURCE DEFINITIONS FOR ADVANCED SCALING
+# =============================================================================
+
+---
+# Custom ScaledObject for Trading Volume-based scaling
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: trading-volume-scaler
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: orchestrator-agent
+  pollingInterval: 20
+  cooldownPeriod: 60
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: trading_volume_per_minute
+      threshold: '1000'
+      query: avg(rate(virtual_trades_total{namespace="mip-platform"}[1m]) * 60)
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: portfolio_updates_per_second
+      threshold: '20'
+      query: avg(rate(portfolio_updates_total{namespace="mip-platform"}[1m]))
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service:9090
+      metricName: market_volatility_index
+      threshold: '0.7'
+      query: avg(market_volatility_index{namespace="mip-platform"})
+
+---
+# Redis Queue-based scaling for async tasks
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: redis-queue-scaler
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: orchestrator-agent
+  pollingInterval: 15
+  cooldownPeriod: 45
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 12
+  triggers:
+  - type: redis
+    metadata:
+      address: redis-service:6379
+      password: redis_password
+      listName: analysis_queue
+      listLength: '10'
+  - type: redis
+    metadata:
+      address: redis-service:6379
+      password: redis_password
+      listName: forecast_queue
+      listLength: '5'
+  - type: redis
+    metadata:
+      address: redis-service:6379
+      password: redis_password
+      listName: sentiment_queue
+      listLength: '15'
+
+---
+# =============================================================================
+# TIME-BASED SCALING SCHEDULES
+# =============================================================================
+
+---
+# Market Hours Scaling (Higher during trading hours)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: market-hours-scaler
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: finbert-agent
+  pollingInterval: 300  # 5 minutes
+  cooldownPeriod: 300
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  triggers:
+  - type: cron
+    metadata:
+      timezone: America/New_York
+      start: "30 9 * * MON-FRI"  # 9:30 AM EST market open
+      end: "00 16 * * MON-FRI"   # 4:00 PM EST market close
+      desiredReplicas: "8"
+  - type: cron
+    metadata:
+      timezone: America/New_York
+      start: "00 16 * * MON-FRI"  # After market close
+      end: "30 9 * * MON-FRI"    # Before market open
+      desiredReplicas: "3"
+
+---
+# Pre-market Analysis Scaling (4:00 AM - 9:30 AM EST)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: premarket-scaler
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    name: tft-agent
+  pollingInterval: 300
+  cooldownPeriod: 300
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 6
+  triggers:
+  - type: cron
+    metadata:
+      timezone: America/New_York
+      start: "00 4 * * MON-FRI"   # 4:00 AM EST pre-market
+      end: "30 9 * * MON-FRI"    # 9:30 AM EST market open
+      desiredReplicas: "5"
+
+---
+# =============================================================================
+# POSITION-BASED SECURITY POLICIES
+# =============================================================================
+
+---
+# Senior Analyst Access Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: senior-analyst-policy
+  namespace: mip-platform
+spec:
+  podSelector:
+    matchLabels:
+      security.mip/access-level: "senior-analyst"
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: fastapi-gateway
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          agent-type: sentiment
+    - podSelector:
+        matchLabels:
+          agent-type: reasoning
+    - podSelector:
+        matchLabels:
+          agent-type: analysis
+    - podSelector:
+        matchLabels:
+          agent-type: forecasting
+    - podSelector:
+        matchLabels:
+          agent-type: orchestrator
+
+---
+# Junior Analyst Access Policy (Restricted)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: junior-analyst-policy
+  namespace: mip-platform
+spec:
+  podSelector:
+    matchLabels:
+      security.mip/access-level: "junior-analyst"
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: fastapi-gateway
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          agent-type: sentiment
+    - podSelector:
+        matchLabels:
+          agent-type: analysis
+    # Note: No access to reasoning (Llama) or forecasting (TFT) agents
+
+---
+# Portfolio Manager Access Policy (Full Access)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portfolio-manager-policy
+  namespace: mip-platform
+spec:
+  podSelector:
+    matchLabels:
+      security.mip/access-level: "portfolio-manager"
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from: []  # Allow from any source
+  egress:
+  - to: []    # Allow to any destination
+
+---
+# =============================================================================
+# RBAC CONFIGURATIONS FOR POSITION-BASED ACCESS
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: senior-analyst-sa
+  namespace: mip-platform
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: senior-analyst-role
+  namespace: mip-platform
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["keda.sh"]
+  resources: ["scaledobjects"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: senior-analyst-binding
+  namespace: mip-platform
+subjects:
+- kind: ServiceAccount
+  name: senior-analyst-sa
+  namespace: mip-platform
+roleRef:
+  kind: Role
+  name: senior-analyst-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# =============================================================================
+# MONITORING AND ALERTING RULES
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: mip-platform
+data:
+  mip-rules.yaml: |
+    groups:
+    - name: mip-agents
+      rules:
+      - alert: HighAgentLatency
+        expr: avg(agent_response_time_ms) > 5000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency detected in {{ $labels.agent_type }} agent"
+          description: "Agent {{ $labels.agent_type }} response time is {{ $value }}ms"
+      
+      - alert: AgentDown
+        expr: up{job=~".*-agent"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent {{ $labels.job }} is down"
+          description: "Agent {{ $labels.job }} has been down for more than 1 minute"
+      
+      - alert: HighGPUMemoryUsage
+        expr: nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU memory usage on {{ $labels.instance }}"
+          description: "GPU memory usage is {{ $value | humanizePercentage }}"
+      
+      - alert: TradingVolumeSpike
+        expr: rate(virtual_trades_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: info
+        annotations:
+          summary: "Trading volume spike detected"
+          description: "Trading volume is {{ $value }} trades/second"
+
+---
+# =============================================================================
+# POD DISRUPTION BUDGETS
+# =============================================================================
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: finbert-pdb
+  namespace: mip-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: finbert-agent
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: llama-pdb
+  namespace: mip-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: llama-agent
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gpt4-pdb
+  namespace: mip-platform
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: gpt4-agent
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fastapi-pdb
+  namespace: mip-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: fastapi-gateway

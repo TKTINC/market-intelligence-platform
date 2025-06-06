@@ -1,0 +1,992 @@
+# =============================================================================
+# ENHANCED KUBERNETES DEPLOYMENT - MARKET INTELLIGENCE PLATFORM
+# Sprint 4 - Production-Ready Multi-Agent Architecture with GPU Support
+# =============================================================================
+
+---
+# Namespace for MIP
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mip-platform
+  labels:
+    name: market-intelligence-platform
+    environment: production
+
+---
+# ConfigMap for Multi-Agent Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mip-config
+  namespace: mip-platform
+data:
+  # Database Configuration
+  POSTGRES_HOST: "postgresql-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mip_db"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  
+  # Agent Configuration
+  FINBERT_MODEL_PATH: "/models/finbert"
+  LLAMA_MODEL_PATH: "/models/llama-3.1-8b"
+  TFT_MODEL_PATH: "/models/tft"
+  
+  # API Configuration
+  API_VERSION: "v1"
+  MAX_CONNECTIONS: "1000"
+  WEBSOCKET_TIMEOUT: "300"
+  
+  # Monitoring
+  PROMETHEUS_PORT: "9090"
+  GRAFANA_PORT: "3000"
+  
+  # Agent Resource Limits
+  FINBERT_MAX_REQUESTS: "100"
+  LLAMA_MAX_REQUESTS: "50"
+  GPT4_MAX_REQUESTS: "200"
+  TFT_MAX_REQUESTS: "75"
+
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mip-secrets
+  namespace: mip-platform
+type: Opaque
+data:
+  # Base64 encoded values
+  POSTGRES_PASSWORD: bWlwX3Bhc3N3b3JkX3NlY3VyZQ==
+  JWT_SECRET: c3VwZXJfc2VjdXJlX2p3dF9rZXk=
+  OPENAI_API_KEY: eW91cl9vcGVuYWlfYXBpX2tleQ==
+  DEEPSEEK_API_KEY: eW91cl9kZWVwc2Vla19hcGlfa2V5
+  REDIS_PASSWORD: cmVkaXNfcGFzc3dvcmQ=
+
+---
+# =============================================================================
+# POSTGRESQL DATABASE DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: mip-platform
+  labels:
+    app: postgresql
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_DB
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_USER
+          value: "mip_user"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: mip-platform
+spec:
+  selector:
+    app: postgresql
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+# =============================================================================
+# REDIS CACHE DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: mip-platform
+  labels:
+    app: redis
+    tier: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: REDIS_PASSWORD
+        command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)"]
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: mip-platform
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+# =============================================================================
+# FINBERT AGENT DEPLOYMENT (CPU-Optimized)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finbert-agent
+  namespace: mip-platform
+  labels:
+    app: finbert-agent
+    agent-type: sentiment
+    tier: ai-agent
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: finbert-agent
+  template:
+    metadata:
+      labels:
+        app: finbert-agent
+        agent-type: sentiment
+    spec:
+      containers:
+      - name: finbert-agent
+        image: mip-platform/finbert-agent:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: MODEL_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: FINBERT_MODEL_PATH
+        - name: MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: FINBERT_MAX_REQUESTS
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+          readOnly: true
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8001
+          initialDelaySeconds: 15
+          periodSeconds: 10
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-storage-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finbert-service
+  namespace: mip-platform
+  labels:
+    agent-type: sentiment
+spec:
+  selector:
+    app: finbert-agent
+  ports:
+  - port: 8001
+    targetPort: 8001
+  type: ClusterIP
+
+---
+# =============================================================================
+# LLAMA AGENT DEPLOYMENT (GPU-Optimized)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-agent
+  namespace: mip-platform
+  labels:
+    app: llama-agent
+    agent-type: reasoning
+    tier: ai-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llama-agent
+  template:
+    metadata:
+      labels:
+        app: llama-agent
+        agent-type: reasoning
+    spec:
+      nodeSelector:
+        accelerator: nvidia-tesla-v100
+      containers:
+      - name: llama-agent
+        image: mip-platform/llama-agent:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: MODEL_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: LLAMA_MODEL_PATH
+        - name: MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: LLAMA_MAX_REQUESTS
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+          readOnly: true
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "2000m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "16Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 15
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-storage-pvc
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-service
+  namespace: mip-platform
+  labels:
+    agent-type: reasoning
+spec:
+  selector:
+    app: llama-agent
+  ports:
+  - port: 8002
+    targetPort: 8002
+  type: ClusterIP
+
+---
+# =============================================================================
+# GPT-4 PROXY AGENT DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpt4-agent
+  namespace: mip-platform
+  labels:
+    app: gpt4-agent
+    agent-type: analysis
+    tier: ai-agent
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: gpt4-agent
+  template:
+    metadata:
+      labels:
+        app: gpt4-agent
+        agent-type: analysis
+    spec:
+      containers:
+      - name: gpt4-agent
+        image: mip-platform/gpt4-agent:latest
+        ports:
+        - containerPort: 8003
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: OPENAI_API_KEY
+        - name: MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: GPT4_MAX_REQUESTS
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8003
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpt4-service
+  namespace: mip-platform
+  labels:
+    agent-type: analysis
+spec:
+  selector:
+    app: gpt4-agent
+  ports:
+  - port: 8003
+    targetPort: 8003
+  type: ClusterIP
+
+---
+# =============================================================================
+# TFT FORECASTING AGENT DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tft-agent
+  namespace: mip-platform
+  labels:
+    app: tft-agent
+    agent-type: forecasting
+    tier: ai-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tft-agent
+  template:
+    metadata:
+      labels:
+        app: tft-agent
+        agent-type: forecasting
+    spec:
+      containers:
+      - name: tft-agent
+        image: mip-platform/tft-agent:latest
+        ports:
+        - containerPort: 8004
+        env:
+        - name: MODEL_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: TFT_MODEL_PATH
+        - name: MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: TFT_MAX_REQUESTS
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+          readOnly: true
+        resources:
+          requests:
+            memory: "3Gi"
+            cpu: "1500m"
+          limits:
+            memory: "6Gi"
+            cpu: "3000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8004
+          initialDelaySeconds: 45
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8004
+          initialDelaySeconds: 20
+          periodSeconds: 10
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-storage-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tft-service
+  namespace: mip-platform
+  labels:
+    agent-type: forecasting
+spec:
+  selector:
+    app: tft-agent
+  ports:
+  - port: 8004
+    targetPort: 8004
+  type: ClusterIP
+
+---
+# =============================================================================
+# ORCHESTRATOR AGENT DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator-agent
+  namespace: mip-platform
+  labels:
+    app: orchestrator-agent
+    agent-type: orchestrator
+    tier: ai-agent
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: orchestrator-agent
+  template:
+    metadata:
+      labels:
+        app: orchestrator-agent
+        agent-type: orchestrator
+    spec:
+      containers:
+      - name: orchestrator-agent
+        image: mip-platform/orchestrator-agent:latest
+        ports:
+        - containerPort: 8005
+        env:
+        - name: FINBERT_SERVICE_URL
+          value: "http://finbert-service:8001"
+        - name: LLAMA_SERVICE_URL
+          value: "http://llama-service:8002"
+        - name: GPT4_SERVICE_URL
+          value: "http://gpt4-service:8003"
+        - name: TFT_SERVICE_URL
+          value: "http://tft-service:8004"
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: REDIS_HOST
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: REDIS_PASSWORD
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8005
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8005
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator-service
+  namespace: mip-platform
+  labels:
+    agent-type: orchestrator
+spec:
+  selector:
+    app: orchestrator-agent
+  ports:
+  - port: 8005
+    targetPort: 8005
+  type: ClusterIP
+
+---
+# =============================================================================
+# FASTAPI GATEWAY DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-gateway
+  namespace: mip-platform
+  labels:
+    app: fastapi-gateway
+    tier: api-gateway
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: fastapi-gateway
+  template:
+    metadata:
+      labels:
+        app: fastapi-gateway
+    spec:
+      containers:
+      - name: fastapi-gateway
+        image: mip-platform/fastapi-gateway:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: ORCHESTRATOR_SERVICE_URL
+          value: "http://orchestrator-service:8005"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: JWT_SECRET
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: REDIS_HOST
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mip-secrets
+              key: REDIS_PASSWORD
+        - name: MAX_CONNECTIONS
+          valueFrom:
+            configMapKeyRef:
+              name: mip-config
+              key: MAX_CONNECTIONS
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-gateway-service
+  namespace: mip-platform
+spec:
+  selector:
+    app: fastapi-gateway
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: LoadBalancer
+
+---
+# =============================================================================
+# REACT DASHBOARD DEPLOYMENT
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: react-dashboard
+  namespace: mip-platform
+  labels:
+    app: react-dashboard
+    tier: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: react-dashboard
+  template:
+    metadata:
+      labels:
+        app: react-dashboard
+    spec:
+      containers:
+      - name: react-dashboard
+        image: mip-platform/react-dashboard:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: REACT_APP_API_URL
+          value: "http://fastapi-gateway-service:8000"
+        - name: REACT_APP_WS_URL
+          value: "ws://fastapi-gateway-service:8000/ws"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: react-dashboard-service
+  namespace: mip-platform
+spec:
+  selector:
+    app: react-dashboard
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: LoadBalancer
+
+---
+# =============================================================================
+# PERSISTENT VOLUME CLAIMS
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: mip-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-storage-pvc
+  namespace: mip-platform
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd
+
+---
+# =============================================================================
+# HORIZONTAL POD AUTOSCALER (HPA) CONFIGURATIONS
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: finbert-hpa
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: finbert-agent
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gpt4-hpa
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gpt4-agent
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-hpa
+  namespace: mip-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-gateway
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 65
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# =============================================================================
+# NETWORK POLICIES FOR SECURITY
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mip-network-policy
+  namespace: mip-platform
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: mip-platform
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: mip-platform
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 443
+
+---
+# =============================================================================
+# RESOURCE QUOTAS
+# =============================================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: mip-resource-quota
+  namespace: mip-platform
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: 100Gi
+    requests.nvidia.com/gpu: "4"
+    limits.cpu: "100"
+    limits.memory: 200Gi
+    limits.nvidia.com/gpu: "4"
+    persistentvolumeclaims: "10"
+    services: "20"
+    secrets: "10"
+    configmaps: "10"
