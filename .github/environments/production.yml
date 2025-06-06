@@ -1,0 +1,123 @@
+# =============================================================================
+# PRODUCTION ENVIRONMENT (.github/environments/production.yml)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: production-config
+  namespace: mip-production
+data:
+  # Application Configuration
+  LOG_LEVEL: "WARN"
+  DEBUG_MODE: "false"
+  TESTING_MODE: "false"
+  ENVIRONMENT: "production"
+  
+  # Database Configuration
+  POSTGRES_HOST: "postgres-prod"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mip_production"
+  POSTGRES_MAX_CONNECTIONS: "500"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-prod"
+  REDIS_PORT: "6379"
+  REDIS_MAX_CONNECTIONS: "1000"
+  
+  # Agent Configuration
+  FINBERT_REPLICAS: "5"
+  LLAMA_REPLICAS: "3"
+  GPT4_REPLICAS: "8"
+  TFT_REPLICAS: "4"
+  ORCHESTRATOR_REPLICAS: "5"
+  
+  # Performance Settings
+  MAX_CONCURRENT_REQUESTS: "1000"
+  REQUEST_TIMEOUT_SECONDS: "120"
+  WEBSOCKET_TIMEOUT_SECONDS: "1800"
+  
+  # Feature Flags
+  ENABLE_GPU_ACCELERATION: "true"
+  ENABLE_ADVANCED_LOGGING: "false"
+  ENABLE_METRICS_COLLECTION: "true"
+  ENABLE_DISTRIBUTED_TRACING: "true"
+  
+  # Security Settings
+  JWT_EXPIRATION_HOURS: "4"
+  RATE_LIMIT_PER_MINUTE: "500"
+  CORS_ORIGINS: "https://mip.example.com,https://dashboard.mip.example.com"
+  
+  # External API Settings
+  OPENAI_MAX_REQUESTS_PER_MINUTE: "1000"
+  DEEPSEEK_MAX_REQUESTS_PER_MINUTE: "1500"
+  
+  # Monitoring
+  PROMETHEUS_SCRAPE_INTERVAL: "60s"
+  GRAFANA_REFRESH_INTERVAL: "30s"
+
+---
+# Production Values for Helm Chart
+global:
+  environment: production
+  imageTag: "{{.Values.global.imageTag}}"  # Set by CI/CD
+  domain: mip.example.com
+  tls:
+    enabled: true
+    secretName: mip-production-tls
+
+replicaCount:
+  finbert: 5
+  llama: 3
+  gpt4: 8
+  tft: 4
+  orchestrator: 5
+  gateway: 6
+  dashboard: 3
+
+resources:
+  finbert:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  llama:
+    requests:
+      memory: "8Gi"
+      cpu: "2000m"
+      nvidia.com/gpu: 1
+    limits:
+      memory: "16Gi"
+      cpu: "4000m"
+      nvidia.com/gpu: 1
+  
+  gateway:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "500"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 50%

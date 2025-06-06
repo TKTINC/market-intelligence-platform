@@ -1,0 +1,47 @@
+# Performance Testing Configuration (.github/workflows/performance.yml)
+name: Performance Testing
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Weekly on Monday at 4 AM
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Locust
+      run: |
+        pip install locust requests
+    
+    - name: Run Load Tests
+      run: |
+        locust -f tests/performance/locustfile.py \
+          --host=${{ vars.TEST_HOST }} \
+          --users=50 \
+          --spawn-rate=5 \
+          --run-time=5m \
+          --headless \
+          --html=performance-report.html
+    
+    - name: Upload Performance Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: performance-report.html

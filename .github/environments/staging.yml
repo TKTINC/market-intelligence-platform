@@ -1,0 +1,108 @@
+# =============================================================================
+# STAGING ENVIRONMENT (.github/environments/staging.yml)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: staging-config
+  namespace: mip-staging
+data:
+  # Application Configuration
+  LOG_LEVEL: "INFO"
+  DEBUG_MODE: "false"
+  TESTING_MODE: "false"
+  ENVIRONMENT: "staging"
+  
+  # Database Configuration
+  POSTGRES_HOST: "postgres-staging"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mip_staging"
+  POSTGRES_MAX_CONNECTIONS: "100"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-staging"
+  REDIS_PORT: "6379"
+  REDIS_MAX_CONNECTIONS: "200"
+  
+  # Agent Configuration
+  FINBERT_REPLICAS: "2"
+  LLAMA_REPLICAS: "2"
+  GPT4_REPLICAS: "3"
+  TFT_REPLICAS: "2"
+  ORCHESTRATOR_REPLICAS: "2"
+  
+  # Performance Settings
+  MAX_CONCURRENT_REQUESTS: "200"
+  REQUEST_TIMEOUT_SECONDS: "60"
+  WEBSOCKET_TIMEOUT_SECONDS: "600"
+  
+  # Feature Flags
+  ENABLE_GPU_ACCELERATION: "true"
+  ENABLE_ADVANCED_LOGGING: "true"
+  ENABLE_METRICS_COLLECTION: "true"
+  ENABLE_DISTRIBUTED_TRACING: "true"
+  
+  # Security Settings
+  JWT_EXPIRATION_HOURS: "8"
+  RATE_LIMIT_PER_MINUTE: "200"
+  CORS_ORIGINS: "https://mip-staging.example.com"
+  
+  # External API Settings
+  OPENAI_MAX_REQUESTS_PER_MINUTE: "200"
+  DEEPSEEK_MAX_REQUESTS_PER_MINUTE: "300"
+  
+  # Monitoring
+  PROMETHEUS_SCRAPE_INTERVAL: "30s"
+  GRAFANA_REFRESH_INTERVAL: "10s"
+
+---
+# Staging Values for Helm Chart
+global:
+  environment: staging
+  imageTag: main-latest
+  domain: mip-staging.example.com
+  tls:
+    enabled: true
+    secretName: mip-staging-tls
+
+replicaCount:
+  finbert: 2
+  llama: 2
+  gpt4: 3
+  tft: 2
+  orchestrator: 2
+  gateway: 3
+  dashboard: 2
+
+resources:
+  finbert:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  llama:
+    requests:
+      memory: "6Gi"
+      cpu: "2000m"
+      nvidia.com/gpu: 1
+    limits:
+      memory: "12Gi"
+      cpu: "4000m"
+      nvidia.com/gpu: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"

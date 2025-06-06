@@ -1,0 +1,455 @@
+# =============================================================================
+# DOCKER COMPOSE CONFIGURATION FOR TESTING ENVIRONMENT
+# Multi-Agent Integration Testing & CI/CD Pipeline Support
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # DATABASE SERVICES
+  # =============================================================================
+  
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: mip-postgres-test
+    environment:
+      POSTGRES_DB: mip_test
+      POSTGRES_USER: mip_test_user
+      POSTGRES_PASSWORD: test_password_123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./tests/sql/init-test-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mip_test_user -d mip_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mip-test-network
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: mip-redis-test
+    command: redis-server --requirepass test_redis_password
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # AI AGENT SERVICES (TEST VERSIONS)
+  # =============================================================================
+  
+  finbert-agent-test:
+    build:
+      context: .
+      dockerfile: src/agents/finbert/Dockerfile.test
+    container_name: mip-finbert-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - MODEL_PATH=/app/models/finbert
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./test-data/models:/app/models:ro
+      - ./tests/data/sentiment:/app/test_data:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  llama-agent-test:
+    build:
+      context: .
+      dockerfile: src/agents/llama/Dockerfile.test
+    container_name: mip-llama-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - MODEL_PATH=/app/models/llama
+      - CUDA_VISIBLE_DEVICES=""  # CPU-only for testing
+      - LLAMA_USE_CPU=true
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./test-data/models:/app/models:ro
+      - ./tests/data/reasoning:/app/test_data:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  gpt4-agent-test:
+    build:
+      context: .
+      dockerfile: src/agents/gpt4/Dockerfile.test
+    container_name: mip-gpt4-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - OPENAI_API_KEY=${OPENAI_API_KEY_TEST:-mock_api_key}
+      - USE_MOCK_API=true  # Use mock for testing
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./tests/data/analysis:/app/test_data:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  tft-agent-test:
+    build:
+      context: .
+      dockerfile: src/agents/tft/Dockerfile.test
+    container_name: mip-tft-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - MODEL_PATH=/app/models/tft
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./test-data/models:/app/models:ro
+      - ./tests/data/forecasting:/app/test_data:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  orchestrator-test:
+    build:
+      context: .
+      dockerfile: src/orchestrator/Dockerfile.test
+    container_name: mip-orchestrator-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - FINBERT_SERVICE_URL=http://finbert-agent-test:8001
+      - LLAMA_SERVICE_URL=http://llama-agent-test:8002
+      - GPT4_SERVICE_URL=http://gpt4-agent-test:8003
+      - TFT_SERVICE_URL=http://tft-agent-test:8004
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8005:8005"
+    depends_on:
+      - finbert-agent-test
+      - llama-agent-test
+      - gpt4-agent-test
+      - tft-agent-test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # GATEWAY & FRONTEND SERVICES
+  # =============================================================================
+  
+  fastapi-gateway-test:
+    build:
+      context: .
+      dockerfile: src/gateway/Dockerfile.test
+    container_name: mip-gateway-test
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - ORCHESTRATOR_SERVICE_URL=http://orchestrator-test:8005
+      - JWT_SECRET=test_jwt_secret_key_for_testing
+      - LOG_LEVEL=DEBUG
+      - TESTING_MODE=true
+    ports:
+      - "8000:8000"
+    depends_on:
+      - orchestrator-test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  react-dashboard-test:
+    build:
+      context: .
+      dockerfile: src/dashboard/Dockerfile.test
+    container_name: mip-dashboard-test
+    environment:
+      - REACT_APP_API_URL=http://fastapi-gateway-test:8000
+      - REACT_APP_WS_URL=ws://fastapi-gateway-test:8000/ws
+      - NODE_ENV=test
+    ports:
+      - "3000:3000"
+    depends_on:
+      - fastapi-gateway-test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # TESTING & MONITORING SERVICES
+  # =============================================================================
+  
+  prometheus-test:
+    image: prom/prometheus:latest
+    container_name: mip-prometheus-test
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./tests/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_test_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=1h'
+      - '--web.enable-lifecycle'
+    networks:
+      - mip-test-network
+
+  grafana-test:
+    image: grafana/grafana:latest
+    container_name: mip-grafana-test
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=test_admin_password
+    volumes:
+      - ./tests/monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./tests/monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_test_data:/var/lib/grafana
+    depends_on:
+      - prometheus-test
+    networks:
+      - mip-test-network
+
+  jaeger-test:
+    image: jaegertracing/all-in-one:latest
+    container_name: mip-jaeger-test
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # LOAD TESTING SERVICE
+  # =============================================================================
+  
+  locust-test:
+    build:
+      context: .
+      dockerfile: tests/performance/Dockerfile.locust
+    container_name: mip-locust-test
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./tests/performance:/mnt/locust
+    environment:
+      - LOCUST_HOST=http://fastapi-gateway-test:8000
+      - LOCUST_USERS=100
+      - LOCUST_SPAWN_RATE=10
+    depends_on:
+      - fastapi-gateway-test
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # MOCK SERVICES FOR TESTING
+  # =============================================================================
+  
+  mock-market-data:
+    build:
+      context: .
+      dockerfile: tests/mocks/Dockerfile.market-data
+    container_name: mip-mock-market-data
+    ports:
+      - "9999:9999"
+    environment:
+      - MOCK_DATA_PATH=/app/mock_data
+    volumes:
+      - ./tests/data/market:/app/mock_data:ro
+    networks:
+      - mip-test-network
+
+  mock-news-feed:
+    build:
+      context: .
+      dockerfile: tests/mocks/Dockerfile.news-feed
+    container_name: mip-mock-news-feed
+    ports:
+      - "9998:9998"
+    environment:
+      - MOCK_NEWS_PATH=/app/mock_news
+    volumes:
+      - ./tests/data/news:/app/mock_news:ro
+    networks:
+      - mip-test-network
+
+  # =============================================================================
+  # TEST RUNNER SERVICE
+  # =============================================================================
+  
+  test-runner:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile.test-runner
+    container_name: mip-test-runner
+    environment:
+      - POSTGRES_HOST=postgres-test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mip_test
+      - POSTGRES_USER=mip_test_user
+      - POSTGRES_PASSWORD=test_password_123
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test_redis_password
+      - GATEWAY_URL=http://fastapi-gateway-test:8000
+      - DASHBOARD_URL=http://react-dashboard-test:3000
+      - PROMETHEUS_URL=http://prometheus-test:9090
+      - TESTING_MODE=true
+    volumes:
+      - ./tests:/app/tests
+      - ./test-results:/app/test-results
+      - ./coverage:/app/coverage
+    depends_on:
+      - fastapi-gateway-test
+      - react-dashboard-test
+      - prometheus-test
+    networks:
+      - mip-test-network
+
+# =============================================================================
+# NETWORK CONFIGURATION
+# =============================================================================
+
+networks:
+  mip-test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# =============================================================================
+# VOLUME CONFIGURATION
+# =============================================================================
+
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  prometheus_test_data:
+    driver: local
+  grafana_test_data:
+    driver: local
+
+# =============================================================================
+# DOCKER COMPOSE PROFILES FOR DIFFERENT TEST SCENARIOS
+# =============================================================================
+
+# Usage Examples:
+# docker-compose -f docker-compose.test.yml --profile unit-tests up -d postgres-test redis-test
+# docker-compose -f docker-compose.test.yml --profile integration-tests up -d
+# docker-compose -f docker-compose.test.yml --profile performance-tests up -d
+# docker-compose -f docker-compose.test.yml --profile full-system up -d

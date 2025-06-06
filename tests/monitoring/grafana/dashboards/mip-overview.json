@@ -1,0 +1,121 @@
+# Grafana Dashboard Configuration (tests/monitoring/grafana/dashboards/mip-overview.json)
+{
+  "dashboard": {
+    "id": null,
+    "title": "MIP Platform Overview",
+    "tags": ["mip", "overview"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Agent Response Times",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg(agent_response_time_ms) by (agent_type)",
+            "legendFormat": "{{agent_type}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Response Time (ms)",
+            "min": 0
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [5000],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "model": {
+                  "expr": "avg(agent_response_time_ms)",
+                  "intervalMs": 1000,
+                  "maxDataPoints": 43200
+                },
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "last"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "2m",
+          "frequency": "10s",
+          "handler": 1,
+          "name": "High Agent Response Time",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(fastapi_requests_total[5m])) by (method, endpoint)",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Agent Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"mip-agents\"}",
+            "legendFormat": "{{instance}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Active Users",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "sum(websocket_active_connections)",
+            "legendFormat": "Active Connections"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Trading Volume",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(virtual_trades_total[1m]) * 60",
+            "legendFormat": "Trades per minute"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Portfolio Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "portfolio_total_value",
+            "legendFormat": "{{portfolio_id}}"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}

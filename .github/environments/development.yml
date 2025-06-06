@@ -1,0 +1,108 @@
+# =============================================================================
+# DEVELOPMENT ENVIRONMENT (.github/environments/development.yml)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: development-config
+  namespace: mip-development
+data:
+  # Application Configuration
+  LOG_LEVEL: "DEBUG"
+  DEBUG_MODE: "true"
+  TESTING_MODE: "true"
+  ENVIRONMENT: "development"
+  
+  # Database Configuration
+  POSTGRES_HOST: "postgres-dev"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mip_dev"
+  POSTGRES_MAX_CONNECTIONS: "20"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-dev"
+  REDIS_PORT: "6379"
+  REDIS_MAX_CONNECTIONS: "50"
+  
+  # Agent Configuration
+  FINBERT_REPLICAS: "1"
+  LLAMA_REPLICAS: "1"
+  GPT4_REPLICAS: "2"
+  TFT_REPLICAS: "1"
+  ORCHESTRATOR_REPLICAS: "1"
+  
+  # Performance Settings
+  MAX_CONCURRENT_REQUESTS: "50"
+  REQUEST_TIMEOUT_SECONDS: "30"
+  WEBSOCKET_TIMEOUT_SECONDS: "300"
+  
+  # Feature Flags
+  ENABLE_GPU_ACCELERATION: "false"
+  ENABLE_ADVANCED_LOGGING: "true"
+  ENABLE_METRICS_COLLECTION: "true"
+  ENABLE_DISTRIBUTED_TRACING: "true"
+  
+  # Security Settings
+  JWT_EXPIRATION_HOURS: "24"
+  RATE_LIMIT_PER_MINUTE: "100"
+  CORS_ORIGINS: "*"
+  
+  # External API Settings
+  OPENAI_MAX_REQUESTS_PER_MINUTE: "60"
+  DEEPSEEK_MAX_REQUESTS_PER_MINUTE: "100"
+  
+  # Monitoring
+  PROMETHEUS_SCRAPE_INTERVAL: "15s"
+  GRAFANA_REFRESH_INTERVAL: "5s"
+
+---
+# Development Values for Helm Chart
+global:
+  environment: development
+  imageTag: develop-latest
+  replicaCount:
+    finbert: 1
+    llama: 1
+    gpt4: 2
+    tft: 1
+    orchestrator: 1
+    gateway: 2
+    dashboard: 1
+
+resources:
+  finbert:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  
+  llama:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  gateway:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+autoscaling:
+  enabled: false
+
+monitoring:
+  enabled: true
+  prometheus:
+    retention: "7d"
+  grafana:
+    plugins:
+      - grafana-piechart-panel
+      - grafana-worldmap-panel

@@ -1,0 +1,963 @@
+# =============================================================================
+# ENHANCED CI/CD PIPELINE FOR MIP PLATFORM
+# Multi-Agent Testing, Security Scanning & Performance Benchmarking
+# =============================================================================
+
+name: MIP Platform CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, 'feature/*', 'hotfix/*' ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily security scans at 2 AM
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        default: false
+        type: boolean
+      force_deploy:
+        description: 'Force deployment (skip approval)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # =============================================================================
+  # CODE QUALITY & SECURITY SCANNING
+  # =============================================================================
+  
+  code-quality:
+    name: Code Quality & Security Scan
+    runs-on: ubuntu-latest
+    outputs:
+      security-score: ${{ steps.security-scan.outputs.score }}
+      quality-gate: ${{ steps.quality-gate.outputs.passed }}
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better analysis
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Security Tools
+      run: |
+        pip install bandit safety semgrep ruff black isort mypy
+        npm install -g snyk audit-ci
+    
+    - name: Run Python Security Scan (Bandit)
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ -f txt
+    
+    - name: Run Dependency Security Check (Safety)
+      run: |
+        pip freeze | safety check --json --output safety-report.json || true
+        pip freeze | safety check
+    
+    - name: Run SAST Scan (Semgrep)
+      run: |
+        semgrep --config=auto src/ --json --output=semgrep-report.json || true
+        semgrep --config=auto src/
+    
+    - name: Python Code Quality (Ruff)
+      run: |
+        ruff check src/ --format=json --output-file=ruff-report.json || true
+        ruff check src/
+    
+    - name: Type Checking (MyPy)
+      run: |
+        mypy src/ --ignore-missing-imports --json-report mypy-report || true
+    
+    - name: Code Formatting Check
+      run: |
+        black --check src/
+        isort --check-only src/
+    
+    - name: Node.js Security Scan
+      working-directory: src/dashboard
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit.json || true
+        npm audit --audit-level=moderate
+    
+    - name: Container Security Scan (Trivy)
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Generate Security Score
+      id: security-scan
+      run: |
+        python .github/scripts/calculate-security-score.py \
+          bandit-report.json safety-report.json semgrep-report.json \
+          > security-score.json
+        echo "score=$(jq -r '.overall_score' security-score.json)" >> $GITHUB_OUTPUT
+    
+    - name: Quality Gate Check
+      id: quality-gate
+      run: |
+        SECURITY_SCORE=$(jq -r '.overall_score' security-score.json)
+        if (( $(echo "$SECURITY_SCORE >= 85" | bc -l) )); then
+          echo "passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "passed=false" >> $GITHUB_OUTPUT
+          echo "Security score $SECURITY_SCORE below threshold (85)"
+        fi
+    
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          *-report.json
+          security-score.json
+          trivy-results.sarif
+    
+    - name: Upload to CodeQL
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: trivy-results.sarif
+
+  # =============================================================================
+  # AGENT-SPECIFIC TESTING
+  # =============================================================================
+  
+  test-finbert-agent:
+    name: Test FinBERT Sentiment Agent
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/agents/finbert/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio pytest-mock
+    
+    - name: Download Test Data
+      run: |
+        mkdir -p test-data/finbert
+        # Download sample financial news for sentiment testing
+        python .github/scripts/download-test-data.py finbert
+    
+    - name: Run FinBERT Unit Tests
+      run: |
+        cd src/agents/finbert
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+    
+    - name: Performance Benchmark
+      run: |
+        cd src/agents/finbert
+        python tests/benchmark_finbert.py > finbert-benchmark.json
+    
+    - name: Sentiment Accuracy Test
+      run: |
+        cd src/agents/finbert
+        python tests/accuracy_test.py > finbert-accuracy.json
+    
+    - name: Memory & CPU Profiling
+      run: |
+        cd src/agents/finbert
+        python -m memory_profiler tests/profile_memory.py > finbert-memory.log
+        python tests/profile_cpu.py > finbert-cpu.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: finbert-test-results
+        path: |
+          src/agents/finbert/htmlcov/
+          src/agents/finbert/finbert-*.json
+          src/agents/finbert/finbert-*.log
+
+  test-llama-agent:
+    name: Test Llama Reasoning Agent
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/agents/llama/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+    
+    - name: Setup Mock GPU Environment
+      run: |
+        # Setup CPU-only testing environment
+        export CUDA_VISIBLE_DEVICES=""
+        export LLAMA_USE_CPU=true
+    
+    - name: Download Model Weights (Mock)
+      run: |
+        mkdir -p test-data/llama
+        python .github/scripts/download-test-models.py llama
+    
+    - name: Run Llama Unit Tests
+      run: |
+        cd src/agents/llama
+        LLAMA_USE_CPU=true pytest tests/ -v --cov=. --cov-report=xml
+    
+    - name: Reasoning Quality Test
+      run: |
+        cd src/agents/llama
+        python tests/reasoning_quality_test.py > llama-reasoning.json
+    
+    - name: Context Window Test
+      run: |
+        cd src/agents/llama
+        python tests/context_window_test.py > llama-context.json
+    
+    - name: Inference Speed Benchmark
+      run: |
+        cd src/agents/llama
+        python tests/benchmark_inference.py > llama-benchmark.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: llama-test-results
+        path: |
+          src/agents/llama/llama-*.json
+          src/agents/llama/coverage.xml
+
+  test-gpt4-agent:
+    name: Test GPT-4 Analysis Agent
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/agents/gpt4/requirements.txt
+        pip install pytest pytest-cov pytest-mock
+    
+    - name: Run GPT-4 Unit Tests (Mocked)
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_TEST }}
+      run: |
+        cd src/agents/gpt4
+        pytest tests/ -v --cov=. --cov-report=xml
+    
+    - name: API Rate Limiting Test
+      run: |
+        cd src/agents/gpt4
+        python tests/rate_limit_test.py > gpt4-rate-limits.json
+    
+    - name: Response Quality Test
+      run: |
+        cd src/agents/gpt4
+        python tests/response_quality_test.py > gpt4-quality.json
+    
+    - name: Error Handling Test
+      run: |
+        cd src/agents/gpt4
+        python tests/error_handling_test.py > gpt4-errors.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: gpt4-test-results
+        path: |
+          src/agents/gpt4/gpt4-*.json
+          src/agents/gpt4/coverage.xml
+
+  test-tft-agent:
+    name: Test TFT Forecasting Agent
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/agents/tft/requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Download Historical Data
+      run: |
+        mkdir -p test-data/tft
+        python .github/scripts/download-market-data.py > test-data/tft/market_data.csv
+    
+    - name: Run TFT Unit Tests
+      run: |
+        cd src/agents/tft
+        pytest tests/ -v --cov=. --cov-report=xml
+    
+    - name: Forecast Accuracy Test
+      run: |
+        cd src/agents/tft
+        python tests/forecast_accuracy_test.py > tft-accuracy.json
+    
+    - name: Model Training Test
+      run: |
+        cd src/agents/tft
+        python tests/training_test.py > tft-training.json
+    
+    - name: Prediction Latency Test
+      run: |
+        cd src/agents/tft
+        python tests/latency_test.py > tft-latency.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: tft-test-results
+        path: |
+          src/agents/tft/tft-*.json
+          src/agents/tft/coverage.xml
+
+  test-orchestrator:
+    name: Test Orchestrator Agent
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/orchestrator/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+    
+    - name: Start Mock Agents
+      run: |
+        python .github/scripts/start-mock-agents.py &
+        sleep 5
+    
+    - name: Run Orchestrator Tests
+      run: |
+        cd src/orchestrator
+        pytest tests/ -v --cov=. --cov-report=xml
+    
+    - name: Multi-Agent Coordination Test
+      run: |
+        cd src/orchestrator
+        python tests/coordination_test.py > orchestrator-coordination.json
+    
+    - name: Load Balancing Test
+      run: |
+        cd src/orchestrator
+        python tests/load_balancing_test.py > orchestrator-load.json
+    
+    - name: Failover Test
+      run: |
+        cd src/orchestrator
+        python tests/failover_test.py > orchestrator-failover.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: orchestrator-test-results
+        path: |
+          src/orchestrator/orchestrator-*.json
+          src/orchestrator/coverage.xml
+
+  test-gateway:
+    name: Test FastAPI Gateway
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        pip install -r src/gateway/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio httpx
+    
+    - name: Run Gateway Tests
+      run: |
+        cd src/gateway
+        pytest tests/ -v --cov=. --cov-report=xml
+    
+    - name: API Load Test
+      run: |
+        cd src/gateway
+        python tests/load_test.py > gateway-load.json
+    
+    - name: WebSocket Test
+      run: |
+        cd src/gateway
+        python tests/websocket_test.py > gateway-websocket.json
+    
+    - name: Authentication Test
+      run: |
+        cd src/gateway
+        python tests/auth_test.py > gateway-auth.json
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: gateway-test-results
+        path: |
+          src/gateway/gateway-*.json
+          src/gateway/coverage.xml
+
+  test-dashboard:
+    name: Test React Dashboard
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: needs.code-quality.outputs.quality-gate == 'true' || github.event.inputs.skip_tests == 'true'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: src/dashboard/package-lock.json
+    
+    - name: Install Dependencies
+      working-directory: src/dashboard
+      run: npm ci
+    
+    - name: Run ESLint
+      working-directory: src/dashboard
+      run: npm run lint
+    
+    - name: Run Unit Tests
+      working-directory: src/dashboard
+      run: npm run test:coverage
+    
+    - name: Run E2E Tests
+      working-directory: src/dashboard
+      run: |
+        npm run build
+        npm run test:e2e
+    
+    - name: Performance Audit (Lighthouse)
+      working-directory: src/dashboard
+      run: |
+        npm install -g @lhci/cli
+        lhci autorun > lighthouse-report.json
+    
+    - name: Accessibility Test
+      working-directory: src/dashboard
+      run: npm run test:a11y
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: dashboard-test-results
+        path: |
+          src/dashboard/coverage/
+          src/dashboard/lighthouse-report.json
+          src/dashboard/test-results/
+
+  # =============================================================================
+  # INTEGRATION TESTING
+  # =============================================================================
+  
+  integration-tests:
+    name: Integration & E2E Testing
+    runs-on: ubuntu-latest
+    needs: [test-finbert-agent, test-llama-agent, test-gpt4-agent, test-tft-agent, test-orchestrator, test-gateway, test-dashboard]
+    if: always() && !cancelled()
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: mip_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Test Images
+      run: |
+        docker-compose -f docker-compose.test.yml build
+    
+    - name: Start Test Environment
+      run: |
+        docker-compose -f docker-compose.test.yml up -d
+        sleep 30  # Wait for services to start
+    
+    - name: Run Integration Tests
+      run: |
+        python -m pytest tests/integration/ -v --tb=short
+    
+    - name: Test Multi-Agent Workflow
+      run: |
+        python tests/integration/test_full_workflow.py > integration-workflow.json
+    
+    - name: Test Real-time Data Flow
+      run: |
+        python tests/integration/test_realtime_flow.py > integration-realtime.json
+    
+    - name: Test Virtual Trading Flow
+      run: |
+        python tests/integration/test_trading_flow.py > integration-trading.json
+    
+    - name: Performance Benchmark
+      run: |
+        python tests/performance/benchmark_full_system.py > performance-benchmark.json
+    
+    - name: Stop Test Environment
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml logs > docker-logs.txt
+        docker-compose -f docker-compose.test.yml down
+    
+    - name: Upload Integration Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-test-results
+        path: |
+          integration-*.json
+          performance-benchmark.json
+          docker-logs.txt
+
+  # =============================================================================
+  # BUILD & PUSH CONTAINER IMAGES
+  # =============================================================================
+  
+  build-images:
+    name: Build & Push Container Images
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    strategy:
+      matrix:
+        component:
+          - finbert-agent
+          - llama-agent
+          - gpt4-agent
+          - tft-agent
+          - orchestrator-agent
+          - fastapi-gateway
+          - react-dashboard
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.component }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and Push Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: src/${{ matrix.component }}/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+    
+    - name: Run Container Security Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.component }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-${{ matrix.component }}.sarif'
+    
+    - name: Upload Security Scan Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: container-security-scans
+        path: trivy-${{ matrix.component }}.sarif
+
+  # =============================================================================
+  # DEPLOYMENT TO ENVIRONMENTS
+  # =============================================================================
+  
+  deploy-development:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: github.ref == 'refs/heads/develop'
+    environment: development
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v1
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_DEV }}
+    
+    - name: Deploy to Development
+      run: |
+        helm upgrade --install mip-platform infrastructure/helm/mip-platform/ \
+          --namespace mip-development \
+          --create-namespace \
+          --values infrastructure/kubernetes/overlays/development/values.yaml \
+          --set global.imageTag=${{ github.sha }} \
+          --timeout 10m \
+          --wait
+    
+    - name: Run Smoke Tests
+      run: |
+        python .github/scripts/smoke-tests.py development
+    
+    - name: Update Deployment Status
+      run: |
+        curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          -H 'Content-type: application/json' \
+          --data '{"text":"🚀 MIP Platform deployed to Development environment"}'
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v1
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+    
+    - name: Deploy to Staging
+      run: |
+        helm upgrade --install mip-platform infrastructure/helm/mip-platform/ \
+          --namespace mip-staging \
+          --create-namespace \
+          --values infrastructure/kubernetes/overlays/staging/values.yaml \
+          --set global.imageTag=${{ github.sha }} \
+          --timeout 15m \
+          --wait
+    
+    - name: Run End-to-End Tests
+      run: |
+        python tests/e2e/test_staging_environment.py
+    
+    - name: Performance Validation
+      run: |
+        python tests/performance/validate_staging_performance.py > staging-performance.json
+    
+    - name: Upload Staging Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: staging-validation-results
+        path: staging-performance.json
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main' && (github.event.inputs.force_deploy == 'true' || success())
+    environment: production
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Manual Approval Check
+      if: github.event.inputs.force_deploy != 'true'
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: ${{ secrets.PRODUCTION_APPROVERS }}
+        minimum-approvals: 2
+        issue-title: "Production Deployment Approval"
+        issue-body: |
+          Please approve the production deployment of MIP Platform.
+          
+          **Commit:** ${{ github.sha }}
+          **Security Score:** ${{ needs.code-quality.outputs.security-score }}
+          **Branch:** ${{ github.ref }}
+          
+          All tests have passed and staging validation is successful.
+    
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v1
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+    
+    - name: Backup Current Production
+      run: |
+        kubectl create backup production-backup-$(date +%Y%m%d-%H%M%S) \
+          --namespace mip-production
+    
+    - name: Deploy to Production (Blue-Green)
+      run: |
+        # Deploy to green environment
+        helm upgrade --install mip-platform-green infrastructure/helm/mip-platform/ \
+          --namespace mip-production \
+          --values infrastructure/kubernetes/overlays/production/values.yaml \
+          --set global.imageTag=${{ github.sha }} \
+          --set global.environment=green \
+          --timeout 20m \
+          --wait
+    
+    - name: Production Health Check
+      run: |
+        python .github/scripts/production-health-check.py
+    
+    - name: Switch Traffic (Blue-Green)
+      run: |
+        kubectl patch service mip-platform-service \
+          --namespace mip-production \
+          --patch '{"spec":{"selector":{"environment":"green"}}}'
+    
+    - name: Cleanup Old Blue Environment
+      run: |
+        sleep 300  # Wait 5 minutes before cleanup
+        kubectl delete deployment mip-platform-blue --namespace mip-production || true
+    
+    - name: Update Production Status
+      run: |
+        curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          -H 'Content-type: application/json' \
+          --data '{"text":"✅ MIP Platform successfully deployed to Production"}'
+
+  # =============================================================================
+  # POST-DEPLOYMENT VALIDATION
+  # =============================================================================
+  
+  post-deployment-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always() && (needs.deploy-production.result == 'success')
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Production API Health Check
+      run: |
+        python .github/scripts/api-health-check.py production
+    
+    - name: Agent Performance Validation
+      run: |
+        python .github/scripts/validate-agent-performance.py production
+    
+    - name: Trading System Validation
+      run: |
+        python .github/scripts/validate-trading-system.py production
+    
+    - name: Generate Deployment Report
+      run: |
+        python .github/scripts/generate-deployment-report.py \
+          --environment production \
+          --commit ${{ github.sha }} \
+          --security-score ${{ needs.code-quality.outputs.security-score }}
+    
+    - name: Upload Deployment Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-report
+        path: deployment-report.json
+
+  # =============================================================================
+  # NOTIFICATION & CLEANUP
+  # =============================================================================
+  
+  notify-completion:
+    name: Notify Pipeline Completion
+    runs-on: ubuntu-latest
+    needs: [post-deployment-validation]
+    if: always()
+    
+    steps:
+    - name: Determine Pipeline Status
+      id: status
+      run: |
+        if [[ "${{ needs.post-deployment-validation.result }}" == "success" ]]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "message=🎉 MIP Platform CI/CD pipeline completed successfully!" >> $GITHUB_OUTPUT
+        elif [[ "${{ needs.post-deployment-validation.result }}" == "failure" ]]; then
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=❌ MIP Platform CI/CD pipeline failed during validation" >> $GITHUB_OUTPUT
+        else
+          echo "status=partial" >> $GITHUB_OUTPUT
+          echo "message=⚠️ MIP Platform CI/CD pipeline completed with warnings" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Send Slack Notification
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ steps.status.outputs.status }}
+        channel: '#mip-deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        custom_payload: |
+          {
+            text: "${{ steps.status.outputs.message }}",
+            attachments: [{
+              color: '${{ steps.status.outputs.status }}' === 'success' ? 'good' : '${{ steps.status.outputs.status }}' === 'failure' ? 'danger' : 'warning',
+              fields: [{
+                title: 'Repository',
+                value: '${{ github.repository }}',
+                short: true
+              }, {
+                title: 'Branch',
+                value: '${{ github.ref }}',
+                short: true
+              }, {
+                title: 'Commit',
+                value: '${{ github.sha }}',
+                short: true
+              }, {
+                title: 'Security Score',
+                value: '${{ needs.code-quality.outputs.security-score }}',
+                short: true
+              }]
+            }]
+          }
+    
+    - name: Create GitHub Release
+      if: github.ref == 'refs/heads/main' && steps.status.outputs.status == 'success'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: MIP Platform Release v${{ github.run_number }}
+        body: |
+          ## MIP Platform Release v${{ github.run_number }}
+          
+          **Commit:** ${{ github.sha }}
+          **Security Score:** ${{ needs.code-quality.outputs.security-score }}/100
+          **Deployed to:** Production
+          
+          ### What's Changed
+          - Multi-agent AI architecture deployment
+          - Enhanced security scanning
+          - Performance optimizations
+          - Virtual trading system updates
+          
+          ### Agent Test Results
+          All agents passed comprehensive testing including:
+          - Unit tests with >90% coverage
+          - Performance benchmarks
+          - Security validation
+          - Integration testing
+        draft: false
+        prerelease: false

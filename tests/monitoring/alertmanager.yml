@@ -1,0 +1,43 @@
+# AlertManager Configuration (tests/monitoring/alertmanager.yml)
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@mip.example.com'
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+  - match:
+      severity: critical
+    receiver: 'critical-alerts'
+  - match:
+      service: trading-system
+    receiver: 'trading-alerts'
+
+receivers:
+- name: 'web.hook'
+  webhook_configs:
+  - url: 'http://127.0.0.1:5001/'
+
+- name: 'critical-alerts'
+  email_configs:
+  - to: 'oncall@mip.example.com'
+    subject: '[CRITICAL] MIP Platform Alert'
+    body: |
+      Alert: {{ .GroupLabels.alertname }}
+      Summary: {{ .CommonAnnotations.summary }}
+      Description: {{ .CommonAnnotations.description }}
+  slack_configs:
+  - api_url: '{{SLACK_WEBHOOK_URL}}'
+    channel: '#critical-alerts'
+    title: 'Critical Alert: {{ .GroupLabels.alertname }}'
+    text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+- name: 'trading-alerts'
+  slack_configs:
+  - api_url: '{{SLACK_WEBHOOK_URL}}'
+    channel: '#trading-alerts'
+    title: 'Trading System Alert'
