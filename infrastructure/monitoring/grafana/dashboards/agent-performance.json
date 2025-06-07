@@ -1,0 +1,20 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "mip-agents",
+    "title": "Market Intelligence Platform - Multi-Agent Performance",
+    "tags": ["agents", "performance"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {"from": "now-1h", "to": "now"},
+    "panels": [
+      {
+        "id": 1,
+        "title": "Agent Request Rate",
+        "type": "stat",
+        "targets": [{"expr": "sum(rate(agent_requests_total[5m])) by (service_name)"}],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      }
+    ]
+  }
+}

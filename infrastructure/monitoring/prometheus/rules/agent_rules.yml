@@ -1,0 +1,68 @@
+groups:
+  - name: agent_performance
+    rules:
+      # Agent Response Time SLA
+      - alert: AgentHighResponseTime
+        expr: histogram_quantile(0.95, rate(agent_request_duration_seconds_bucket[5m])) > 2.0
+        for: 2m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "Agent {{ $labels.service_name }} high response time"
+          description: "95th percentile response time is {{ $value }}s for agent {{ $labels.service_name }}"
+
+      # Agent Error Rate
+      - alert: AgentHighErrorRate
+        expr: rate(agent_requests_total{status=~"4..|5.."}[5m]) / rate(agent_requests_total[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "High error rate for agent {{ $labels.service_name }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for agent {{ $labels.service_name }}"
+
+      # GPU Memory Usage (for ML models)
+      - alert: HighGPUMemoryUsage
+        expr: gpu_memory_used_bytes / gpu_memory_total_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU memory usage on {{ $labels.instance }}"
+          description: "GPU memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+
+  - name: trading_alerts
+    rules:
+      # Virtual Trading Portfolio Risk
+      - alert: HighPortfolioRisk
+        expr: virtual_trading_portfolio_var_95 > 50000
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High portfolio VaR detected"
+          description: "95% VaR is ${{ $value }} exceeding threshold"
+
+      # Position Concentration Risk
+      - alert: PositionConcentrationRisk
+        expr: max(virtual_trading_position_weight) > 0.15
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High position concentration detected"
+          description: "Position weight {{ $value | humanizePercentage }} exceeds 15% limit"
+
+  - name: cost_optimization
+    rules:
+      # High API Costs
+      - alert: HighAPIUsageCosts
+        expr: increase(agent_api_cost_total[1h]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API usage costs detected"
+          description: "API costs increased by ${{ $value }} in last hour"
